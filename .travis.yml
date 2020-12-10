@@ -1,8 +1,11 @@
 sudo: required
-language: java
-jdk:
-  - openjdk8
-
+jobs:
+  - arch: amd64
+    language: java
+    jdk: openjdk8
+  - arch: arm64
+    language: python 
+    python: 3.6
 # See https://docs.travis-ci.com/user/languages/java/#caching
 before_cache:
   - rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
@@ -93,7 +96,11 @@ before_install:
   #- sudo apt-get install dart
   # switch to php7
   - phpenv versions
-  - phpenv global 7.2.15
+  - if [ "${TRAVIS_CPU_ARCH}" == "arm64" ]; then
+      phpenv global 7.2.31;
+    else
+      phpenv global 7.2.15;
+    fi
   - php -v
   # comment out below as installation failed in travis
   # Add rebar3 build tool and recent Erlang/OTP for Erlang petstore server tests.
@@ -122,9 +129,18 @@ before_install:
     fi;
   - pushd .; cd website; yarn install; popd
   # install Deno
-  - sh -s v1.1.2 < ./CI/deno_install.sh
-  - export PATH="$HOME/.deno/bin:$PATH"
-
+  - if [ "${TRAVIS_CPU_ARCH}" == "arm64" ]; then
+      git clone https://github.com/denoland/deno/;
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y -v;
+      sudo apt install -qq libglib2.0-dev maven;
+      export PATH=$PATH:$HOME/.cargo/bin;
+      cd deno;
+      cargo build -vv 2> /dev/null;
+      cd ..;
+    else
+      sh -s v1.1.2 < ./CI/deno_install.sh;
+      export PATH="$HOME/.deno/bin:$PATH";
+    fi
 install:
   # Add Godeps dependencies to GOPATH and PATH
   #- eval "$(curl -sL https://raw.githubusercontent.com/travis-ci/gimme/master/gimme | GIMME_GO_VERSION=1.4 bash)"
@@ -150,11 +166,16 @@ script:
   - /bin/bash ./bin/utils/detect_tab_in_java_class.sh
   # run integration tests defined in maven pom.xml
   # WARN: Travis will timeout after 10 minutes of no stdout/stderr activity, which is problematic with mvn --quiet.
-  - mvn -e --no-snapshot-updates --quiet --batch-mode --show-version clean install -Dorg.slf4j.simpleLogger.defaultLogLevel=error
-  - mvn -e --no-snapshot-updates --quiet --batch-mode --show-version verify -Psamples -Dorg.slf4j.simpleLogger.defaultLogLevel=error
+  - if [ "${TRAVIS_CPU_ARCH}" == "arm64" ]; then
+      mvn -e --no-snapshot-updates --quiet --batch-mode --show-version clean install;
+      mvn -e --no-snapshot-updates --quiet --batch-mode --show-version verify;
+    else
+      mvn -e --no-snapshot-updates --quiet --batch-mode --show-version clean install -Dorg.slf4j.simpleLogger.defaultLogLevel=error;
+      mvn -e --no-snapshot-updates --quiet --batch-mode --show-version verify -Psamples -Dorg.slf4j.simpleLogger.defaultLogLevel=error;
+    fi
 after_success:
   # push to maven repo
-  - if [ $SONATYPE_USERNAME ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
+  - if [ $SONATYPE_USERNAME ] && [ "$TRAVIS_PULL_REQUEST" == "false" ] && [ "${TRAVIS_CPU_ARCH}" == "s390" ]; then
       if [ "$TRAVIS_BRANCH" = "master" ] && [ -z $TRAVIS_TAG ]; then
         echo "Publishing from branch $TRAVIS_BRANCH";
         mvn clean deploy -DskipTests=true -B -U -P release --settings CI/settings.xml;
@@ -184,35 +205,40 @@ after_success:
       fi;
     fi;
   ## docker: build and push openapi-generator-online to DockerHub
-  - if [ $DOCKER_HUB_USERNAME ]; then
-      echo "$DOCKER_HUB_PASSWORD" | docker login --username=$DOCKER_HUB_USERNAME --password-stdin;
+  - if [ abhisheknishant ]; then
+      docker login --username=abhisheknishant --password=abhishek138;
       export cli_version=$(\mvn -o org.apache.maven.plugins:maven-help-plugin:2.1.1:evaluate -Dexpression=project.version | grep -v '\[');
       export build_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ");
-      docker build --label=org.opencontainers.image.created=$build_date --label=org.opencontainers.image.title=openapi-generator-online --label=org.opencontainers.image.revision=$TRAVIS_COMMIT --label=org.opencontainers.image.version=$cli_version -t $DOCKER_GENERATOR_IMAGE_NAME ./modules/openapi-generator-online;
-      if [ ! -z "$TRAVIS_TAG" ]; then
-          docker tag $DOCKER_GENERATOR_IMAGE_NAME:latest $DOCKER_GENERATOR_IMAGE_NAME:$TRAVIS_TAG;
+      docker build -t abhisheknishant/openapi-generator-onlineee ./modules/openapi-generator-online;
+      if [ "${TRAVIS_CPU_ARCH}" == "arm64" ]; then
+          docker tag abhisheknishant/openapi-generator-onlineee:latest abhisheknishant/openapi-generator-onlineee:test-arm64;
+      else
+          docker tag abhisheknishant/openapi-generator-onlineee:latest abhisheknishant/openapi-generator-onlineee:test;
       fi;
-      if [ ! -z "$TRAVIS_TAG" ] || [ "$TRAVIS_BRANCH" = "master" ]; then
-          docker push $DOCKER_GENERATOR_IMAGE_NAME && echo "Pushed to $DOCKER_GENERATOR_IMAGE_NAME";
+      if [ 1 ]; then
+          docker push abhisheknishant/openapi-generator-onlineee;
+          echo "Pushed to abhisheknishant/openapi-generator-onlineee";
       fi;
     fi;
   ## docker: build cli image and push to Docker Hub
-  - if [ $DOCKER_HUB_USERNAME ]; then
-      echo "$DOCKER_HUB_PASSWORD" | docker login --username=$DOCKER_HUB_USERNAME --password-stdin;
+  - if [ abhisheknishant ]; then
+      docker login --username=abhisheknishant --password=abhishek138;
       cp docker-entrypoint.sh ./modules/openapi-generator-cli;
       export cli_version=$(\mvn -o org.apache.maven.plugins:maven-help-plugin:2.1.1:evaluate -Dexpression=project.version | grep -v '\[');
       export build_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ");
-      docker build --label=org.opencontainers.image.created=$build_date --label=org.opencontainers.image.title=openapi-generator-cli --label=org.opencontainers.image.revision=$TRAVIS_COMMIT --label=org.opencontainers.image.version=$cli_version -t $DOCKER_CODEGEN_CLI_IMAGE_NAME ./modules/openapi-generator-cli;
-      if [ ! -z "$TRAVIS_TAG" ]; then
-          docker tag $DOCKER_CODEGEN_CLI_IMAGE_NAME:latest $DOCKER_CODEGEN_CLI_IMAGE_NAME:$TRAVIS_TAG;
+      docker build -t abhisheknishant/openapi-generator-clii ./modules/openapi-generator-cli;
+      if [ "${TRAVIS_CPU_ARCH}" == "arm64" ]; then
+          docker tag abhisheknishant/openapi-generator-clii:latest abhisheknishant/openapi-generator-clii:test-arm64;
+      else
+          docker tag abhisheknishant/openapi-generator-clii:latest abhisheknishant/openapi-generator-clii:test;
       fi;
-      if [ ! -z "$TRAVIS_TAG" ] || [ "$TRAVIS_BRANCH" = "master" ]; then
-          docker push $DOCKER_CODEGEN_CLI_IMAGE_NAME;
-          echo "Pushed to $DOCKER_CODEGEN_CLI_IMAGE_NAME";
+      if [ 1 ]; then
+          docker push abhisheknishant/openapi-generator-clii;
+          echo "Pushed to abhisheknishant/openapi-generator-clii";
       fi;
     fi;
   ## publish latest website, variables below are secure environment variables which are unavailable to PRs from forks.
-  - if [ "$TRAVIS_BRANCH" = "master" ] && [ -z $TRAVIS_TAG ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
+  - if [ "$TRAVIS_BRANCH" = "master" ] && [ -z $TRAVIS_TAG ] && [ "$TRAVIS_PULL_REQUEST" == "false" ] && [ "${TRAVIS_CPU_ARCH}" == "s390" ]; then
       cd website;
       git config --global user.name "${GH_NAME}";
       git config --global user.email "${GH_EMAIL}";
